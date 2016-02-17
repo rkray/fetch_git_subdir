@@ -1,0 +1,99 @@
+#!/usr/bin/ruby
+# Author: René Kray <rene@kray.info>
+
+require 'optparse'
+require 'json'
+require 'pp'
+require 'net/http'
+require 'openssl'
+require 'base64'
+
+# curl -k --header "PRIVATE-TOKEN: 1zb4NWWCeCw7jrwrCPMK" "https://gitlab-test/api/v3/projects"
+
+class FetchGitSubdir
+    attr_accessor :version, :verbose, :log, :conf
+
+    def initialize
+        @conf={
+            :debug          => nil
+        }
+        option_parser
+    end
+
+    def run
+        #self.send @conf[:mode]
+        pp "-"*20,@conf,"-"*20
+
+        #uri = URI('https://gitlab-test/api/v3/projects')
+        #uri = URI('https://gitlab-test/api/v3/projects/all')
+        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/files?file_path=README.md&ref=master')
+        
+        # dir
+        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
+        # subdir
+        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
+        # file
+        uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
+
+        #res = Net::HTTP.get(uri)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = true
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE # read into this
+        data=""
+        resp = http.get(
+            uri.request_uri,
+            'PRIVATE-TOKEN' => '1zb4NWWCeCw7jrwrCPMK'
+        ){|l|
+            data+=l
+        }
+        #req = Net::HTTP::Get.new(uri)
+        #req.basic_auth 'user', 'pass'
+
+        pp resp
+        #pp resp.methods
+        pp resp.content_type
+        if(resp.content_type=="application/json")
+            r=JSON.parse(data)
+            pp r
+            #puts Base64.decode64(r["content"])
+
+        else
+            puts data
+        end
+    end
+
+    private
+
+    def option_parser
+        option_parser = OptionParser.new do |opts|
+            #opts.banner = "Usage: example.rb [options]"
+            opts.on( "-d", "--debug", "enable debug mode") do
+                @conf[:debug] = true
+            end
+            opts.on( "-v", "--verbose", "enable verbose logging") do
+                @conf[:debug] = true
+            end
+            opts.on( "-u", "--username USERNAME", "set username") do |option|
+                @conf[:username]=option
+            end
+            opts.on( "-p", "--password PASSWORD", "set password") do |option|
+                @conf[:password]=option
+            end
+            opts.on( "-P", "--passwordfile FILENAME", "read password from file") do |option|
+                @conf[:passwordfile]=option
+            end
+            opts.on( "-s", "--source URI", "fetch directory from URL",
+                "Example: #{File.basename $0}"
+            ) do |option|
+                @conf[:uri]=option
+            end
+        end
+        option_parser.parse!
+    end
+end
+
+# don't run this part neither load from another script nor irb
+if $0 == __FILE__
+    @iuh = FetchGitSubdir.new
+    @iuh.run
+end
