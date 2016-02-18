@@ -7,6 +7,7 @@ require 'pp'
 require 'net/http'
 require 'openssl'
 require 'base64'
+require 'uri'
 
 # curl -k --header "PRIVATE-TOKEN: 1zb4NWWCeCw7jrwrCPMK" "https://gitlab-test/api/v3/projects"
 
@@ -15,7 +16,9 @@ class FetchGitSubdir
 
     def initialize
         @conf={
-            :debug          => nil
+            :debug          => nil,
+            :uri            => nil,
+            :passvarname    => "GITPASS"
         }
         option_parser
     end
@@ -24,16 +27,25 @@ class FetchGitSubdir
         #self.send @conf[:mode]
         pp "-"*20,@conf,"-"*20
 
-        #uri = URI('https://gitlab-test/api/v3/projects')
+        update_private_token
+        update_project_id
+
+        exit
+
         #uri = URI('https://gitlab-test/api/v3/projects/all')
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/files?file_path=README.md&ref=master')
+
+        # get PRIVATE-TOKEN
+        # curl -k https://gitlab-test/api/v3/session --data "login=rkray&password=${PASS}"
+
+        uri = URI('https://gitlab-test/api/v3/projects')
         
         # dir
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
         # subdir
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
         # file
-        uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
+        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
 
         #res = Net::HTTP.get(uri)
         http = Net::HTTP.new(uri.host, uri.port)
@@ -42,7 +54,7 @@ class FetchGitSubdir
         data=""
         resp = http.get(
             uri.request_uri,
-            'PRIVATE-TOKEN' => '1zb4NWWCeCw7jrwrCPMK'
+            'PRIVATE-TOKEN' => @conf[:privat_token]
         ){|l|
             data+=l
         }
@@ -54,7 +66,8 @@ class FetchGitSubdir
         pp resp.content_type
         if(resp.content_type=="application/json")
             r=JSON.parse(data)
-            pp r
+            r.each{|project| pp project['id']}
+            #pp r
             #puts Base64.decode64(r["content"])
 
         else
@@ -63,6 +76,67 @@ class FetchGitSubdir
     end
 
     private
+
+    def update_project_id
+        uri = URI('https://gitlab-test/api/v3/projects')
+        path="/api/v3/projects"
+        r=get path
+        r.each{|project|
+            if (
+                (project['http_url_to_repo'] == @conf[:uri]) or
+                (project['web_url'] == @conf[:uri])
+            )
+                @conf[:project_id]=project['id']
+            end
+        }
+    end
+
+    def update_private_token
+        path="/api/v3/session"
+        pass=ENV[@conf[:passvarname]]
+        postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
+        r=post path,postdata
+        @conf[:privat_token]=r['private_token']
+    end
+
+    def get(path)
+        http=connection
+        data=""
+        resp = http.get(
+            path,
+            'PRIVATE-TOKEN' => @conf[:privat_token]
+        ){|l|
+            data+=l
+        }
+        if(resp.content_type=="application/json")
+            return JSON.parse(data)
+        else
+            return data
+        end
+    end
+
+    def post(path,postdata)
+        #path="/api/v3/session"
+        data=''
+        pass=ENV[@conf[:passvarname]]
+        postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
+        http=connection
+        resp = http.post(path,postdata){|l|data+=l}
+        if(resp.content_type=="application/json")
+            return JSON.parse(data)
+        else
+            return data
+        end
+    end
+
+    # generate a new http/https connection object
+    def connection
+        uri=URI(@conf[:uri])
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = true
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        return http
+    end
 
     def option_parser
         option_parser = OptionParser.new do |opts|
@@ -73,19 +147,29 @@ class FetchGitSubdir
             opts.on( "-v", "--verbose", "enable verbose logging") do
                 @conf[:debug] = true
             end
+            opts.on( "-m", "--mode (gitlab|git)", "set mode, default is 'gitlab'") do |option|
+                @conf[:mode]=option
+            end
             opts.on( "-u", "--username USERNAME", "set username") do |option|
                 @conf[:username]=option
             end
-            opts.on( "-p", "--password PASSWORD", "set password") do |option|
-                @conf[:password]=option
+            opts.on( "-p", "--passvarname NAME",
+                "set set the name with the environment variable",
+                "default is GITPASS",
+                "Example:",
+                "  PASS=123 #{File.basename $0} -p PASS"
+            ) do |option|
+                @conf[:passvarname]=option
             end
-            opts.on( "-P", "--passwordfile FILENAME", "read password from file") do |option|
-                @conf[:passwordfile]=option
-            end
-            opts.on( "-s", "--source URI", "fetch directory from URL",
+            opts.on( "-r", "--repository URI", "set repository URL",
                 "Example: #{File.basename $0}"
             ) do |option|
                 @conf[:uri]=option
+            end
+            opts.on( "-a", "--path PATH", "fetch all files from PATH",
+                "Example: #{File.basename $0}"
+            ) do |option|
+                @conf[:path]=option
             end
         end
         option_parser.parse!
