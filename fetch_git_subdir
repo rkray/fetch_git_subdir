@@ -9,8 +9,6 @@ require 'openssl'
 require 'base64'
 require 'uri'
 
-# curl -k --header "PRIVATE-TOKEN: 1zb4NWWCeCw7jrwrCPMK" "https://gitlab-test/api/v3/projects"
-
 class FetchGitSubdir
     attr_accessor :version, :verbose, :log, :conf
 
@@ -18,69 +16,96 @@ class FetchGitSubdir
         @conf={
             :debug          => nil,
             :uri            => nil,
-            :passvarname    => "GITPASS"
+            :passvarname    => "GITPASS",
+            :verbose        => nil
         }
         option_parser
     end
 
     def run
         #self.send @conf[:mode]
-        pp "-"*20,@conf,"-"*20
 
+        debug "update_private_token"
         update_private_token
+        debug "update_project_id"
         update_project_id
+        debug @conf
 
-        exit
+        get_dirtree
 
-        #uri = URI('https://gitlab-test/api/v3/projects/all')
-        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/files?file_path=README.md&ref=master')
-
-        # get PRIVATE-TOKEN
-        # curl -k https://gitlab-test/api/v3/session --data "login=rkray&password=${PASS}"
-
-        uri = URI('https://gitlab-test/api/v3/projects')
-        
         # dir
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
         # subdir
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
         # file
         #uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
-
-        #res = Net::HTTP.get(uri)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = true
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE # read into this
-        data=""
-        resp = http.get(
-            uri.request_uri,
-            'PRIVATE-TOKEN' => @conf[:privat_token]
-        ){|l|
-            data+=l
-        }
-        #req = Net::HTTP::Get.new(uri)
-        #req.basic_auth 'user', 'pass'
-
-        pp resp
-        #pp resp.methods
-        pp resp.content_type
-        if(resp.content_type=="application/json")
-            r=JSON.parse(data)
-            r.each{|project| pp project['id']}
-            #pp r
-            #puts Base64.decode64(r["content"])
-
-        else
-            puts data
-        end
     end
 
     private
 
+    def get_dirtree
+        debug "enter get_dirtree"
+        
+        # TODO
+        # add logic to decide here to create a top dir or not
+
+        get_subdir @conf[:path]
+    end
+
+    # TODO
+    # implement the create option, if create is false, no directory should be 
+    def get_subdir(dir=nil,create=true)
+        debug "enter get_subdir"
+
+        # check for options
+        args=[]
+        args<<%(path=#{dir}) unless dir.nil?
+        args<<%(ref_name=#{@conf[:branch]}) unless @conf[:branch].nil?
+        
+        # define path
+        path="/api/v3/projects/#{@conf[:project_id]}/repository/tree"
+        
+        # add options to path unless args is empty
+        path+="?"+args.join("&") unless args.empty?
+
+        result=get path
+        debug "result tree",result
+        
+        result.each do |entry|
+            # print tree unless @conf[:verbose] is nil
+            unless @conf[:verbose].nil?
+                unless dir.nil?
+                    puts %(#{dir}/#{entry['name']} [#{entry['type']}])
+                else
+                    puts %(#{entry['name']} [#{entry['type']}])
+                end
+            end
+            
+            # TODO erzeugen des unterverzeichnisses (mkdir)
+
+            # TODO chdir in das unterverzeichnis
+
+            # TODO ziehen aller files
+            # check here the path: if it specify a file/blob we could pull the data and
+            # print directly to stdout, if the regarding option is set
+
+
+            # fuer jedes unterverzeichnis get_subdir aufrufen
+            if entry['type']=='tree'
+                if dir.nil?
+                    get_subdir entry['name']
+                else
+                    get_subdir dir+"/"+entry['name']
+                end
+            end
+        end
+    end
+
     def update_project_id
-        uri = URI('https://gitlab-test/api/v3/projects')
         path="/api/v3/projects"
+        debug "get path"
         r=get path
+        debug "collect data"
         r.each{|project|
             if (
                 (project['http_url_to_repo'] == @conf[:uri]) or
@@ -96,10 +121,12 @@ class FetchGitSubdir
         pass=ENV[@conf[:passvarname]]
         postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
         r=post path,postdata
+        debug "user id",r
         @conf[:privat_token]=r['private_token']
     end
 
     def get(path)
+        debug "GET",path
         http=connection
         data=""
         resp = http.get(
@@ -131,10 +158,19 @@ class FetchGitSubdir
 
     # generate a new http/https connection object
     def connection
+        debug "create connection",@conf[:uri]
         uri=URI(@conf[:uri])
+        debug "Net::HTTP.new", uri.host, uri.port
         http = Net::HTTP.new(uri.host, uri.port)
+
+        # TODO
+        # check URI for http/https
         http.use_ssl = true
+
+        # TODO
+        # make it configureable over dcommand line flags
         http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        
         return http
     end
 
@@ -144,8 +180,8 @@ class FetchGitSubdir
             opts.on( "-d", "--debug", "enable debug mode") do
                 @conf[:debug] = true
             end
-            opts.on( "-v", "--verbose", "enable verbose logging") do
-                @conf[:debug] = true
+            opts.on( "-v", "--verbose", "enable verbose printing") do
+                @conf[:verbose] = true
             end
             opts.on( "-m", "--mode (gitlab|git)", "set mode, default is 'gitlab'") do |option|
                 @conf[:mode]=option
@@ -174,10 +210,17 @@ class FetchGitSubdir
         end
         option_parser.parse!
     end
+
+    def debug *a
+        if @conf[:debug]==true
+            pp a
+        end
+    end
+    
 end
 
 # don't run this part neither load from another script nor irb
 if $0 == __FILE__
-    @iuh = FetchGitSubdir.new
-    @iuh.run
+    @fgs = FetchGitSubdir.new
+    @fgs.run
 end
