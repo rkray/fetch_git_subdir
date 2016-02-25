@@ -17,14 +17,17 @@ class FetchGitSubdir
             :debug          => nil,
             :uri            => nil,
             :passvarname    => "GITPASS",
-            :verbose        => nil
+            :verbose        => nil,
+            :branch         => "master",
+            :path           => nil,
+            :topleveldir    => nil
         }
         option_parser
     end
 
     def run
         #self.send @conf[:mode]
-
+        update_path
         debug "update_private_token"
         update_private_token
         debug "update_project_id"
@@ -43,6 +46,27 @@ class FetchGitSubdir
 
     private
 
+    def update_path
+        unless @conf[:path].nil?
+
+            # remove leading /
+            if @conf[:path][0] == '/'
+                @conf[:path]=@conf[:path][1..-1]
+            end
+
+            # if there is an trailing / than remove a / and set @conf[:dopleveldir]=tru
+            if @conf[:path][-1] == '/'
+                @conf[:path]=@conf[:path][0..-2]
+                @conf[:topleveldir]=true
+            end
+
+            # set @conf[:basedir]
+            if @conf[:path].scan('/').length > 0
+                @conf[:basedir]=@conf[:path].split('/')[0..-2].join('/')+'/'
+            end
+        end
+    end
+
     def get_dirtree
         debug "enter get_dirtree"
         
@@ -57,6 +81,17 @@ class FetchGitSubdir
     def get_subdir(dir=nil,create=true)
         debug "enter get_subdir"
 
+        newdir=nil
+        # create subdir
+        if((create == true) and (dir != nil))
+            newdir=dir.sub(%r(^#{@conf[:basedir]}),"")
+            unless(Dir.exists? newdir)
+                Dir.mkdir(newdir)
+            else
+                debug %(directory #{newdir} already exists)
+            end        
+        end
+
         # check for options
         args=[]
         args<<%(path=#{dir}) unless dir.nil?
@@ -68,8 +103,8 @@ class FetchGitSubdir
         # add options to path unless args is empty
         path+="?"+args.join("&") unless args.empty?
 
+        # get directory content 
         result=get path
-        debug "result tree",result
         
         result.each do |entry|
             # print tree unless @conf[:verbose] is nil
@@ -80,17 +115,31 @@ class FetchGitSubdir
                     puts %(#{entry['name']} [#{entry['type']}])
                 end
             end
-            
-            # TODO erzeugen des unterverzeichnisses (mkdir)
 
-            # TODO chdir in das unterverzeichnis
-
-            # TODO ziehen aller files
+            # TODO
             # check here the path: if it specify a file/blob we could pull the data and
             # print directly to stdout, if the regarding option is set
+            #uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
+            if entry['type']=='blob'
+                # build remote path
+                remote_filepath=''
+                remote_filepath+=dir+'/' unless dir.nil?
+                remote_filepath+=entry['name']
+                basepath="/api/v3/projects/#{@conf[:project_id]}/repository/blobs/#{@conf[:branch]}"
+                option="filepath=#{remote_filepath}"
+                path="#{basepath}?#{option}"
 
+                result=get path
+                unless newdir.nil?
+                    out_file = File.new(newdir+'/'+entry['name'], "w")
+                else
+                    out_file = File.new(entry['name'], "w")
+                end
+                out_file.puts result
+                out_file.close
+            end
 
-            # fuer jedes unterverzeichnis get_subdir aufrufen
+            # call get_subdir for all directories
             if entry['type']=='tree'
                 if dir.nil?
                     get_subdir entry['name']
@@ -123,17 +172,19 @@ class FetchGitSubdir
         r=post path,postdata
         debug "user id",r
         @conf[:privat_token]=r['private_token']
+        debug @conf
     end
 
     def get(path)
         debug "GET",path
         http=connection
+        debug http.inspect
         data=""
         resp = http.get(
             path,
             'PRIVATE-TOKEN' => @conf[:privat_token]
-        ){|l|
-            data+=l
+        ){|line|
+            data+=line
         }
         if(resp.content_type=="application/json")
             return JSON.parse(data)
@@ -143,7 +194,6 @@ class FetchGitSubdir
     end
 
     def post(path,postdata)
-        #path="/api/v3/session"
         data=''
         pass=ENV[@conf[:passvarname]]
         postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
