@@ -17,6 +17,7 @@ class FetchGitSubdir
             :debug          => nil,
             :uri            => nil,
             :passvarname    => "GITPASS",
+            :readpass       => nil,
             :verbose        => nil,
             :branch         => "master",
             :path           => nil,
@@ -35,17 +36,11 @@ class FetchGitSubdir
         debug @conf
 
         get_dirtree
-
-        # dir
-        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
-        # subdir
-        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/tree?path=lib')
-        # file
-        #uri = URI('https://gitlab-test/api/v3/projects/2/repository/blobs/master?filepath=lib/library1.lib')
     end
 
     private
 
+    # analyze the option and update the config
     def update_path
         unless @conf[:path].nil?
 
@@ -54,7 +49,7 @@ class FetchGitSubdir
                 @conf[:path]=@conf[:path][1..-1]
             end
 
-            # if there is an trailing / than remove a / and set @conf[:dopleveldir]=tru
+            # if there is an trailing / than remove the / and set @conf[:dopleveldir]=tru
             if @conf[:path][-1] == '/'
                 @conf[:path]=@conf[:path][0..-2]
                 @conf[:topleveldir]=true
@@ -115,6 +110,7 @@ class FetchGitSubdir
                     puts %(#{entry['name']} [#{entry['type']}])
                 end
             end
+            pp entry
 
             # TODO
             # check here the path: if it specify a file/blob we could pull the data and
@@ -166,11 +162,20 @@ class FetchGitSubdir
     end
 
     def update_private_token
+        if @conf[:readpass]
+            # read pass from stdin
+            pass=STDIN.read
+            puts "---- PASS -----",pass,'---------------'
+        else
+            # read pass from environment
+            pass=ENV[@conf[:passvarname]]
+        end
+
         path="/api/v3/session"
-        pass=ENV[@conf[:passvarname]]
-        postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
+        #postdata=URI.encode("login=r#{@conf[:username]}&password=#{pass}")
+        postdata=URI.encode("login=bla&password=fuu")
         r=post path,postdata
-        debug "user id",r
+        debug "AUTHRESULT",r
         @conf[:privat_token]=r['private_token']
         debug @conf
     end
@@ -224,37 +229,58 @@ class FetchGitSubdir
         return http
     end
 
+    def examples
+        cmd=File.basename $0
+        return [
+            "",
+            "  Examples:",
+            "    # read password from environment",
+            "    PASS=123 #{cmd} -p PASS -u user -r https://...",
+            "",
+            "    # read password from stdin",
+            "    echo 123 | ssh user@host '#{cmd} -s -u user -r https://...'",
+            "",
+            "    # example repo url",
+            "    #{cmd} -r https://gitlab.mydomain.com/team/testapi.git"
+        ].join("\n")
+    end
+
     def option_parser
         option_parser = OptionParser.new do |opts|
-            #opts.banner = "Usage: example.rb [options]"
+            opts.banner = "Usage: #{File.basename $0} [options]"
+            opts.on("-h", "--help", "Prints this help") do
+                puts opts.help
+                puts examples
+                exit
+            end
             opts.on( "-d", "--debug", "enable debug mode") do
                 @conf[:debug] = true
             end
             opts.on( "-v", "--verbose", "enable verbose printing") do
                 @conf[:verbose] = true
             end
-            opts.on( "-m", "--mode (gitlab|git)", "set mode, default is 'gitlab'") do |option|
-                @conf[:mode]=option
-            end
+            # for now disable modes
+            # opts.on( "-m", "--mode (gitlab|git)", "set mode, default is 'gitlab'") do |option|
+            #     @conf[:mode]=option
+            # end
             opts.on( "-u", "--username USERNAME", "set username") do |option|
                 @conf[:username]=option
             end
+            opts.on( "-s", "--readpass", "try to read the password from stdin") do
+                @conf[:readpass]=true
+            end
             opts.on( "-p", "--passvarname NAME",
-                "set set the name with the environment variable",
-                "default is GITPASS",
-                "Example:",
-                "  PASS=123 #{File.basename $0} -p PASS"
+                "the name with the environment variable",
+                "default is GITPASS"
             ) do |option|
                 @conf[:passvarname]=option
             end
-            opts.on( "-r", "--repository URI", "set repository URL",
-                "Example: #{File.basename $0}"
+            opts.on( "-r", "--repository URI",
+                "HTTP/HTTPS repository URL as shown by gitlab","project page"
             ) do |option|
                 @conf[:uri]=option
             end
-            opts.on( "-a", "--path PATH", "fetch all files from PATH",
-                "Example: #{File.basename $0}"
-            ) do |option|
+            opts.on( "-a", "--path PATH", "fetch all files from PATH") do |option|
                 @conf[:path]=option
             end
         end
@@ -272,5 +298,6 @@ end
 # don't run this part neither load from another script nor irb
 if $0 == __FILE__
     @fgs = FetchGitSubdir.new
+    
     @fgs.run
 end
