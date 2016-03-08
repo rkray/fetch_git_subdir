@@ -8,6 +8,7 @@ require 'net/http'
 require 'openssl'
 require 'base64'
 require 'uri'
+require 'timeout'
 
 class FetchGitSubdir
     attr_accessor :version, :verbose, :log, :conf
@@ -21,7 +22,8 @@ class FetchGitSubdir
             :verbose        => nil,
             :branch         => "master",
             :path           => nil,
-            :topleveldir    => nil
+            :topleveldir    => nil,
+            :stdin_timeout  => 1
         }
         option_parser
     end
@@ -33,6 +35,7 @@ class FetchGitSubdir
         update_private_token
         debug "update_project_id"
         update_project_id
+
         debug @conf
 
         get_dirtree
@@ -49,7 +52,7 @@ class FetchGitSubdir
                 @conf[:path]=@conf[:path][1..-1]
             end
 
-            # if there is an trailing / than remove the / and set @conf[:dopleveldir]=tru
+            # if there is an trailing / than remove the / and set @conf[:dopleveldir]=true
             if @conf[:path][-1] == '/'
                 @conf[:path]=@conf[:path][0..-2]
                 @conf[:topleveldir]=true
@@ -72,7 +75,7 @@ class FetchGitSubdir
     end
 
     # TODO
-    # implement the create option, if create is false, no directory should be 
+    # implement the create option, if create is false, no directory should be created
     def get_subdir(dir=nil,create=true)
         debug "enter get_subdir"
 
@@ -110,7 +113,7 @@ class FetchGitSubdir
                     puts %(#{entry['name']} [#{entry['type']}])
                 end
             end
-            pp entry
+            debug entry
 
             # TODO
             # check here the path: if it specify a file/blob we could pull the data and
@@ -162,22 +165,24 @@ class FetchGitSubdir
     end
 
     def update_private_token
-        if @conf[:readpass]
+        pass=''
+        if ENV[@conf[:passvarname]].nil?
             # read pass from stdin
-            pass=STDIN.read
-            puts "---- PASS -----",pass,'---------------'
+            status = Timeout::timeout(@conf[:stdin_timeout]) {
+                pass=STDIN.read.chomp
+            }
         else
             # read pass from environment
             pass=ENV[@conf[:passvarname]]
         end
-
+        
         path="/api/v3/session"
-        #postdata=URI.encode("login=r#{@conf[:username]}&password=#{pass}")
-        postdata=URI.encode("login=bla&password=fuu")
+        postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
         r=post path,postdata
-        debug "AUTHRESULT",r
         @conf[:privat_token]=r['private_token']
-        debug @conf
+    rescue Timeout::Error
+        STDERR.puts "can't read pass from stdin"
+        exit 66
     end
 
     def get(path)
@@ -185,30 +190,38 @@ class FetchGitSubdir
         http=connection
         debug http.inspect
         data=""
-        resp = http.get(
-            path,
-            'PRIVATE-TOKEN' => @conf[:privat_token]
-        ){|line|
+        resp = http.get(path, 'PRIVATE-TOKEN' => @conf[:privat_token]){|line|
             data+=line
         }
+
+        raise resp.message if resp.code.to_i >= 400
+
         if(resp.content_type=="application/json")
             return JSON.parse(data)
         else
             return data
         end
+    rescue Exception => e
+        STDERR.puts @conf[:uri]+": "+e.message
+        exit
     end
 
     def post(path,postdata)
         data=''
-        pass=ENV[@conf[:passvarname]]
-        postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
         http=connection
         resp = http.post(path,postdata){|l|data+=l}
+
+        raise resp.message if resp.code.to_i >= 400
+
         if(resp.content_type=="application/json")
             return JSON.parse(data)
         else
             return data
         end
+    rescue Exception => e
+        debug 'POSTDATA',postdata
+        STDERR.puts @conf[:uri]+": "+e.message
+        exit
     end
 
     # generate a new http/https connection object
@@ -238,7 +251,7 @@ class FetchGitSubdir
             "    PASS=123 #{cmd} -p PASS -u user -r https://...",
             "",
             "    # read password from stdin",
-            "    echo 123 | ssh user@host '#{cmd} -s -u user -r https://...'",
+            "    echo 123 | ssh user@host '#{cmd} -u user -r https://...'",
             "",
             "    # example repo url",
             "    #{cmd} -r https://gitlab.mydomain.com/team/testapi.git"
@@ -266,12 +279,11 @@ class FetchGitSubdir
             opts.on( "-u", "--username USERNAME", "set username") do |option|
                 @conf[:username]=option
             end
-            opts.on( "-s", "--readpass", "try to read the password from stdin") do
-                @conf[:readpass]=true
-            end
             opts.on( "-p", "--passvarname NAME",
                 "the name with the environment variable",
-                "default is GITPASS"
+                "default is GITPASS. If no environment",
+                "variable is set, the programm tries to",
+                "read the password from stdin."
             ) do |option|
                 @conf[:passvarname]=option
             end
