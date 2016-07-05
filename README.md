@@ -21,6 +21,7 @@ Usage
         -r, --repository URI             HTTP/HTTPS repository URL as shown by gitlab
                                          project page
         -a, --path PATH                  fetch all files from PATH
+        -t, --target PATH                target directory
 
       Examples:
         # read password from environment
