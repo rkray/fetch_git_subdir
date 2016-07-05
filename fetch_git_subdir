@@ -1,5 +1,6 @@
 #!/usr/bin/ruby
 # Author: René Kray <rene@kray.info>
+# Date: 08.03.2016
 
 require 'optparse'
 require 'json'
@@ -23,7 +24,8 @@ class FetchGitSubdir
             :branch         => "master",
             :path           => nil,
             :topleveldir    => nil,
-            :stdin_timeout  => 1
+            :stdin_timeout  => 1,
+            :target         => "."
         }
         option_parser
     end
@@ -46,16 +48,15 @@ class FetchGitSubdir
     # analyze the option and update the config
     def update_path
         unless @conf[:path].nil?
-
-            # remove leading /
-            if @conf[:path][0] == '/'
-                @conf[:path]=@conf[:path][1..-1]
-            end
-
             # if there is an trailing / than remove the / and set @conf[:dopleveldir]=true
             if @conf[:path][-1] == '/'
                 @conf[:path]=@conf[:path][0..-2]
                 @conf[:topleveldir]=true
+            end
+
+            # remove leading /
+            if @conf[:path][0] == '/'
+                @conf[:path]=@conf[:path][1..-1]
             end
 
             # set @conf[:basedir]
@@ -67,6 +68,8 @@ class FetchGitSubdir
 
     def get_dirtree
         debug "enter get_dirtree"
+
+        Dir.chdir(@conf[:target])
         
         # TODO
         # add logic to decide here to create a top dir or not
@@ -76,18 +79,24 @@ class FetchGitSubdir
 
     # TODO
     # implement the create option, if create is false, no directory should be created
+    # 
+    # WARNING
+    # this function can not handle a path to a file
     def get_subdir(dir=nil,create=true)
-        debug "enter get_subdir"
+        debug "enter get_subdir #{dir}"
 
-        newdir=nil
         # create subdir
         if((create == true) and (dir != nil))
+            debug "basedir=#{@conf[:basedir]}"
             newdir=dir.sub(%r(^#{@conf[:basedir]}),"")
             unless(Dir.exists? newdir)
+                debug "mkdir=#{newdir}"
+                debug Dir.pwd
+                debug newdir.class
                 Dir.mkdir(newdir)
             else
                 debug %(directory #{newdir} already exists)
-            end        
+            end
         end
 
         # check for options
@@ -103,16 +112,21 @@ class FetchGitSubdir
 
         # get directory content 
         result=get path
-        
+
         result.each do |entry|
             # print tree unless @conf[:verbose] is nil
             unless @conf[:verbose].nil?
+                type=entry['type']
+                type="link" if(type=="blob" and entry['mode']=="120000")
+                mode=entry['mode'][3..5]
+                info=%(#{entry['name']} [#{type}] [#{mode}])
                 unless dir.nil?
-                    puts %(#{dir}/#{entry['name']} [#{entry['type']}])
+                    puts %(#{dir}/#{info})
                 else
-                    puts %(#{entry['name']} [#{entry['type']}])
+                    puts info
                 end
             end
+
             debug entry
 
             # TODO
@@ -129,13 +143,30 @@ class FetchGitSubdir
                 path="#{basepath}?#{option}"
 
                 result=get path
-                unless newdir.nil?
-                    out_file = File.new(newdir+'/'+entry['name'], "w")
+
+                # mode 120000 indicates an symbolic link
+                if entry['mode'] == "120000"
+                    if((create == true) and (dir != nil))
+                        linkname=newdir+'/'+entry['name']
+                    else
+                        linkname=entry['name']
+                    end
+                    next if File.symlink?(linkname)
+                    File.symlink(result,linkname)
+
+                # handle her usual files
                 else
-                    out_file = File.new(entry['name'], "w")
+                    if((create == true) and (dir != nil))
+                        filename=newdir+'/'+entry['name']
+                    else
+                        filename=entry['name']
+                    end
+                    out_file = File.new(filename, "w")
+                    out_file.puts result
+                    # convert integer to octal to handle the permissions propperly
+                    out_file.chmod(entry['mode'][2..5].to_i(8))
+                    out_file.close
                 end
-                out_file.puts result
-                out_file.close
             end
 
             # call get_subdir for all directories
@@ -294,6 +325,9 @@ class FetchGitSubdir
             end
             opts.on( "-a", "--path PATH", "fetch all files from PATH") do |option|
                 @conf[:path]=option
+            end
+            opts.on( "-t", "--target PATH", "target directory") do |option|
+                @conf[:target]=option
             end
         end
         option_parser.parse!
