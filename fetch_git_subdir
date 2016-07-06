@@ -14,6 +14,15 @@ require 'timeout'
 class FetchGitSubdir
     attr_accessor :version, :verbose, :log, :conf
 
+    class Error < RuntimeError
+    end
+
+    class FileNotFound < Error
+    end
+
+    class RepoPermissionDenied < Error
+    end
+
     def initialize
         @conf={
             :debug          => nil,
@@ -40,7 +49,22 @@ class FetchGitSubdir
 
         debug @conf
 
-        get_dirtree
+        if check_for_single_blob
+            get_single_blob
+        else
+            get_dirtree
+        end
+
+    rescue FileNotFound
+        STDERR.puts "ERROR: can't find file #{@conf[:path]} in repository."
+        exit 1
+    rescue RepoPermissionDenied
+        STDERR.puts "ERROR: can't read from repository. Permission denied."
+        exit 1
+    rescue Exception => e
+        STDERR.puts e.message
+        debug e.backtrace
+        #debug e.message,e.backtrace,e.inspect
     end
 
     private
@@ -66,22 +90,103 @@ class FetchGitSubdir
         end
     end
 
+
+    # this function checks the @conf[:path] variable and gives true back if the path
+    # linket to a blob or false if it links to 
+    # TODO
+    # - handle symlinks correctly
+    def check_for_single_blob
+        
+        returnvalue = get_entry @conf[:path]
+
+        if returnvalue["type"] == "blob"
+            return true
+        else
+            return false
+        end
+    end
+
+    # this function gets the directory entry for a path and return this structure
+    # {"id"=>"alphanumeric",
+    #  "name"=>"filen or directory name",
+    #  "type"=>"blob|tree",
+    #  "mode"=>"100755"}
+    # The function raise an FileNotFound exception if the is not a matching file in the
+    # repository
+    def get_entry(path=nil)
+
+        # if @config[:path] is nil we fetch the whole repository. Than we start with the
+        # toplevel directory and that can not be a file
+        return false if path.nil?
+        
+        # read parent directoy to find out the type for the path element
+        parent=File.dirname path
+        basename=File.basename path
+
+        args=[%(ref_name=#{@conf[:branch]})]
+        # add no path option if parent is ".", gitlab isn't be able to handle a . or a empty
+        # path option. To recieve the root directory the path option have to be unset
+        args<<%(path=#{parent}) unless parent == "."
+        
+        # define path
+        path="/api/v3/projects/#{@conf[:project_id]}/repository/tree"
+        
+        # add options to path unless args is empty
+        path+="?"+args.join("&") unless args.empty?
+
+        # get directory content 
+        result=get path
+        
+        returnvalue=result.find{|o|o["name"]==basename}
+        if returnvalue.nil?
+            raise FileNotFound
+        else
+            return returnvalue
+        end
+    end
+
+    # get a single blob and write it to the basename of @conf[:path]
+    def get_single_blob
+        entry=get_entry @conf[:path]
+
+        basepath="/api/v3/projects/#{@conf[:project_id]}/repository/blobs/#{@conf[:branch]}"
+        option="filepath=#{@conf[:path]}"
+        path="#{basepath}?#{option}"
+
+        result=get path
+
+        debug result
+    
+        filename=""
+        unless @conf[:target].nil?
+            filename=@conf[:target]
+            filename<<"/" unless filename[-1]=="/"
+        end
+        filename<<File.basename(@conf[:path])
+
+        out_file = File.new(filename, "w")
+        out_file.puts result
+        # convert integer to octal to handle the permissions propperly
+        out_file.chmod(entry['mode'][2..5].to_i(8))
+        out_file.close
+    end
+
     def get_dirtree
         debug "enter get_dirtree"
 
         Dir.chdir(@conf[:target])
         
         # TODO
-        # add logic to decide here to create a top dir or not
+        # - add logic to decide here to create a top dir or not
 
         get_subdir @conf[:path]
     end
 
     # TODO
-    # implement the create option, if create is false, no directory should be created
+    # - implement the create option, if create is false, no directory should be created
     # 
     # WARNING
-    # this function can not handle a path to a file
+    # - this function can not handle a path to a file
     def get_subdir(dir=nil,create=true)
         debug "enter get_subdir #{dir}"
 
@@ -102,7 +207,7 @@ class FetchGitSubdir
         # check for options
         args=[]
         args<<%(path=#{dir}) unless dir.nil?
-        args<<%(ref_name=#{@conf[:branch]}) unless @conf[:branch].nil?
+        args<<%(ref_name=#{@conf[:branch]})
         
         # define path
         path="/api/v3/projects/#{@conf[:project_id]}/repository/tree"
@@ -143,6 +248,8 @@ class FetchGitSubdir
                 path="#{basepath}?#{option}"
 
                 result=get path
+
+                debug result
 
                 # mode 120000 indicates an symbolic link
                 if entry['mode'] == "120000"
@@ -213,10 +320,10 @@ class FetchGitSubdir
         @conf[:privat_token]=r['private_token']
     rescue Timeout::Error
         STDERR.puts "can't read pass from stdin"
-        exit 66
+        exit 1
     end
 
-    def get(path)
+    def get(path,return_type=nil)
         debug "GET",path
         http=connection
         debug http.inspect
