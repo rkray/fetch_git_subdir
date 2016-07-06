@@ -156,7 +156,7 @@ class FetchGitSubdir
         result=get path
 
         debug result
-    
+
         filename=""
         unless @conf[:target].nil?
             filename=@conf[:target]
@@ -169,6 +169,9 @@ class FetchGitSubdir
         # convert integer to octal to handle the permissions propperly
         out_file.chmod(entry['mode'][2..5].to_i(8))
         out_file.close
+
+        # print filename unless @conf[:verbose] is nil
+        verbose_print ".",entry
     end
 
     def get_dirtree
@@ -220,17 +223,7 @@ class FetchGitSubdir
 
         result.each do |entry|
             # print tree unless @conf[:verbose] is nil
-            unless @conf[:verbose].nil?
-                type=entry['type']
-                type="link" if(type=="blob" and entry['mode']=="120000")
-                mode=entry['mode'][3..5]
-                info=%(#{entry['name']} [#{type}] [#{mode}])
-                unless dir.nil?
-                    puts %(#{dir}/#{info})
-                else
-                    puts info
-                end
-            end
+            verbose_print dir,entry
 
             debug entry
 
@@ -283,6 +276,20 @@ class FetchGitSubdir
                 else
                     get_subdir dir+"/"+entry['name']
                 end
+            end
+        end
+    end
+
+    def verbose_print dir,entry
+        unless @conf[:verbose].nil?
+            type=entry['type']
+            type="link" if(type=="blob" and entry['mode']=="120000")
+            mode=entry['mode'][3..5]
+            info=%(#{entry['name']} [#{type}] [#{mode}])
+            unless dir.nil?
+                puts %(#{dir}/#{info})
+            else
+                puts info
             end
         end
     end
