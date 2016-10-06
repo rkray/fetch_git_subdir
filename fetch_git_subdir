@@ -1,6 +1,7 @@
 #!/usr/bin/ruby
 # Author: René Kray <rene@kray.info>
 # Date: 08.03.2016
+# repository: https://github.com/rkray/fetch_git_subdir
 
 require 'optparse'
 require 'json'
@@ -399,7 +400,9 @@ class FetchGitSubdir
             "    echo 123 | ssh user@host '#{cmd} -u user -r https://...'",
             "",
             "    # example repo url",
-            "    #{cmd} -r https://gitlab.mydomain.com/team/testapi.git"
+            "    #{cmd} -r https://gitlab.mydomain.com/team/testapi.git",
+            "",
+            "  repository: https://github.com/rkray/fetch_git_subdir"
         ].join("\n")
     end
 
