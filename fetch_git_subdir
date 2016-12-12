@@ -34,7 +34,7 @@ class FetchGitSubdir
             :passvarname    => "GITPASS",
             :readpass       => nil,
             :verbose        => nil,
-            :branch         => "master",
+            :branch         => nil,
             :path           => nil,
             :topleveldir    => nil,
             :stdin_timeout  => 1,
@@ -318,6 +318,9 @@ class FetchGitSubdir
                 (project['web_url'] == @conf[:uri])
             )
                 @conf[:project_id]=project['id']
+                if @conf[:branch].nil?
+                    @conf[:branch]=project['default_branch']
+                end
             end
         }
     end
@@ -346,19 +349,21 @@ class FetchGitSubdir
     end
 
     def get(path,return_type=nil)
-        debug "GET",path
+        debug "GET: ",path
         http=connection
-        debug http.inspect
+        debug "http.inspect: ",http.inspect
         data=""
         resp = http.get(path, 'PRIVATE-TOKEN' => @conf[:privat_token]){|line|
             data+=line
         }
 
-        raise resp.message if resp.code.to_i >= 400
+        raise "GET.error: "+resp.message if resp.code.to_i >= 400
 
         if(resp.content_type=="application/json")
+            debug JSON.parse(data)
             return JSON.parse(data)
         else
+            debug data
             return data
         end
     rescue Exception => e
@@ -460,6 +465,9 @@ class FetchGitSubdir
             end
             opts.on( "-t", "--target PATH", "target directory") do |option|
                 @conf[:target]=option
+            end
+            opts.on( "-b", "--branch BRANCH", "set repository branch. By default the project default branch is used.") do |option|
+                @conf[:branch]=option
             end
         end
         option_parser.parse!
