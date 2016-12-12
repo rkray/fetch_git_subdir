@@ -21,6 +21,9 @@ class FetchGitSubdir
     class FileNotFound < Error
     end
 
+    class PathNotSpecified < Error
+    end
+
     class RepoPermissionDenied < Error
     end
 
@@ -42,9 +45,14 @@ class FetchGitSubdir
 
     def run
         #self.send @conf[:mode]
+
+        raise PathNotSpecified if @conf[:path].nil?
+
+        debug "update_path"
         update_path
         debug "update_private_token"
         update_private_token
+
         debug "update_project_id"
         update_project_id
 
@@ -56,14 +64,18 @@ class FetchGitSubdir
             get_dirtree
         end
 
+    rescue PathNotSpecified
+        STDERR.puts "ERROR: you have to specify a path (option -a)."
+        exit 1
     rescue FileNotFound
         STDERR.puts "ERROR: can't find file #{@conf[:path]} in repository."
         exit 1
     rescue RepoPermissionDenied
-        STDERR.puts "ERROR: can't read from repository. Permission denied."
+        STDERR.puts "ERROR: can't read from repository. Permission denied.\nCheck the username and password."
         exit 1
     rescue Exception => e
         STDERR.puts e.message
+        debug "Class: "+e.class.to_s
         debug e.backtrace
         #debug e.message,e.backtrace,e.inspect
     end
@@ -321,6 +333,8 @@ class FetchGitSubdir
             # read pass from environment
             pass=ENV[@conf[:passvarname]]
         end
+
+        debug ["USERNAME",@conf[:username]]
         
         path="/api/v3/session"
         postdata=URI.encode("login=#{@conf[:username]}&password=#{pass}")
@@ -355,6 +369,7 @@ class FetchGitSubdir
     def post(path,postdata)
         data=''
         http=connection
+        debug 'POSTPATH',path
         resp = http.post(path,postdata){|l|data+=l}
 
         raise resp.message if resp.code.to_i >= 400
