@@ -313,7 +313,8 @@ class FetchGitSubdir
         r=get path
         debug "collect data"
         r.each{|project|
-            debug "PROJECT",project['http_url_to_repo']
+            debug "http_url_to_repo",project['http_url_to_repo']
+            debug "web_uri",project['http_url_to_repo']
             if (
                 (project['http_url_to_repo'] == @conf[:uri]) or
                 (project['web_url'] == @conf[:uri])
