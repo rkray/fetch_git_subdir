@@ -313,6 +313,7 @@ class FetchGitSubdir
         r=get path
         debug "collect data"
         r.each{|project|
+            debug "PROJECT",project['http_url_to_repo']
             if (
                 (project['http_url_to_repo'] == @conf[:uri]) or
                 (project['web_url'] == @conf[:uri])
@@ -323,6 +324,7 @@ class FetchGitSubdir
                 end
             end
         }
+        raise "can't find project id for #{@conf[:uri]}" if @conf[:project_id].nil?
     end
 
     def update_private_token
@@ -357,18 +359,15 @@ class FetchGitSubdir
             data+=line
         }
 
-        raise "GET.error: "+resp.message if resp.code.to_i >= 400
+        raise "GET.error: code #{resp.code} "+resp.message if resp.code.to_i >= 400
 
         if(resp.content_type=="application/json")
-            debug JSON.parse(data)
+            #debug JSON.parse(data)
             return JSON.parse(data)
         else
-            debug data
+            #debug data
             return data
         end
-    rescue Exception => e
-        STDERR.puts @conf[:uri]+": "+e.message
-        exit
     end
 
     def post(path,postdata)
