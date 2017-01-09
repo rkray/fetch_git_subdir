@@ -56,11 +56,16 @@ class FetchGitSubdir
         debug "update_project_id"
         update_project_id
 
-        debug @conf
+        debug "-"*20,@conf,"-"*20
 
-        if check_for_single_blob
+        if @conf[:path]==""
+            debug "get all"
+            get_dirtree
+        elsif check_for_single_blob
+            debug "get_single_blob"
             get_single_blob
         else
+            debug "get_dirtree"
             get_dirtree
         end
 
@@ -85,6 +90,7 @@ class FetchGitSubdir
     # analyze the option and update the config
     def update_path
         unless @conf[:path].nil?
+            
             # if there is an trailing / than remove the / and set @conf[:dopleveldir]=true
             if @conf[:path][-1] == '/'
                 @conf[:path]=@conf[:path][0..-2]
@@ -110,6 +116,8 @@ class FetchGitSubdir
     # - handle symlinks correctly
     def check_for_single_blob
         
+        debug "check_for_single_blob"
+
         returnvalue = get_entry @conf[:path]
 
         if returnvalue["type"] == "blob"
@@ -206,10 +214,21 @@ class FetchGitSubdir
     def get_subdir(dir=nil,create=true)
         debug "enter get_subdir #{dir}"
 
+        # base dir is the directory, where we start
+        unless @conf[:basedir].nil?
+            basedir=@conf[:basedir]
+        end
+
         # create subdir
-        if((create == true) and (dir != nil))
-            debug "basedir=#{@conf[:basedir]}"
-            newdir=dir.sub(%r(^#{@conf[:basedir]}),"")
+        if((dir != "") and (create == true) and (dir != nil))
+            debug "basedir=#{basedir}"
+            newdir=dir.sub(%r(^#{basedir}),"")
+
+            # remove leading /
+            if newdir[0] == '/'
+                newdir=newdir[1..-1]
+            end
+
             unless(Dir.exists? newdir)
                 debug "mkdir=#{newdir}"
                 debug Dir.pwd
@@ -218,6 +237,8 @@ class FetchGitSubdir
             else
                 debug %(directory #{newdir} already exists)
             end
+        else
+            newdir="."
         end
 
         # check for options
@@ -285,6 +306,8 @@ class FetchGitSubdir
             # call get_subdir for all directories
             if entry['type']=='tree'
                 if dir.nil?
+                    get_subdir entry['name']
+                elsif dir ==""
                     get_subdir entry['name']
                 else
                     get_subdir dir+"/"+entry['name']
@@ -459,7 +482,7 @@ class FetchGitSubdir
             ) do |option|
                 @conf[:uri]=option
             end
-            opts.on( "-a", "--path PATH", "fetch all files from PATH") do |option|
+            opts.on( "-a", "--path PATH", "fetch all files from PATH. Do fetch all files use a single '/'.") do |option|
                 @conf[:path]=option
             end
             opts.on( "-t", "--target PATH", "target directory") do |option|
