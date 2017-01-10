@@ -255,7 +255,7 @@ class FetchGitSubdir
         # get directory content 
         result=get path
 
-        result.each do |entry|
+        result[:data].each do |entry|
             # print tree unless @conf[:verbose] is nil
             verbose_print dir,entry
 
@@ -331,23 +331,31 @@ class FetchGitSubdir
     end
 
     def update_project_id
-        path="/api/v3/projects"
-        debug "get path"
-        r=get path
-        debug "collect data"
-        r.each{|project|
-            debug "http_url_to_repo",project['http_url_to_repo'],"web_uri",project['http_url_to_repo']
-            if (
-                (project['http_url_to_repo'] == @conf[:uri]) or
-                (project['web_url'] == @conf[:uri])
-            )
-                @conf[:project_id]=project['id']
-                if @conf[:branch].nil?
-                    @conf[:branch]=project['default_branch']
+        page=0
+        begin
+            page+=1
+            path="/api/v3/projects?page=#{page}"
+            debug "get path"
+            result=get path
+            debug "collect data"
+            result[:data].each{|project|
+                debug "http_url_to_repo",project['http_url_to_repo'],"web_uri",project['http_url_to_repo']
+                if (
+                    (project['http_url_to_repo'] == @conf[:uri]) or
+                    (project['web_url'] == @conf[:uri])
+                )
+                    @conf[:project_id]=project['id']
+                    if @conf[:branch].nil?
+                        @conf[:branch]=project['default_branch']
+                    end
                 end
-            end
-        }
-        raise "can't find project id for #{@conf[:uri]}" if @conf[:project_id].nil?
+            }
+            debug @conf[:project_id].nil?,page,result[:http_header]["X-Total-Pages"].to_i
+        end while (@conf[:project_id].nil? and page < result[:http_header]["X-Total-Pages"].to_i)
+
+        if @conf[:project_id].nil?
+            raise "can't find project id for #{@conf[:uri]}"
+        end
     end
 
     def update_private_token
@@ -385,8 +393,15 @@ class FetchGitSubdir
         raise "GET.error: code #{resp.code} "+resp.message if resp.code.to_i >= 400
 
         if(resp.content_type=="application/json")
-            #debug JSON.parse(data)
-            return JSON.parse(data)
+            json=JSON.parse(data)
+            http_header={}
+            %w(X-Next-Page X-Page X-Per-Page X-Prev-Page X-Page X-Total X-Total-Pages).each do |header|
+                unless resp[header].nil?
+                    debug "#{header}:"+resp[header]
+                    http_header[header]=resp[header]
+                end
+            end
+            return {:data=>json,:http_header=>http_header}
         else
             #debug data
             return data
